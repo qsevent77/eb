@@ -6,6 +6,9 @@ from matplotlib.path import Path
 import numpy as np
 import utils as ul
 import os
+import serial
+import time
+from typing import Union
 
 def multiline_text_path(text, font_size=20, font_name="DejaVu Sans"):
     # font_prop = FontProperties(family=font_name)
@@ -95,6 +98,61 @@ def get_font_support():
     sys_fonts = system_fonts()
     fonts.update(sys_fonts)
     return fonts
+
+
+def upload_gcode_to_grbl(port: str, baudrate: int, gcode: Union[str, list], is_file: bool = True):
+    """
+    上传 G-code 到 GRBL 控制板
+    
+    参数:
+        port (str): 串口端口 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
+        baudrate (int): 波特率 (GRBL 默认 115200)
+        gcode (str|list): G-code 文件路径 (is_file=True) 或 G-code 文本/列表 (is_file=False)
+        is_file (bool): True 表示 gcode 是文件路径, False 表示 gcode 是字符串或列表
+    """
+    # 读取 G-code 内容
+    if is_file:
+        if not os.path.exists(gcode):
+            raise FileNotFoundError(f"G-code file not found: {gcode}")
+        with open(gcode, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    else:
+        if isinstance(gcode, str):
+            lines = gcode.splitlines()
+        elif isinstance(gcode, list):
+            lines = gcode
+        else:
+            raise ValueError("gcode must be str or list when is_file=False")
+
+    # 连接 GRBL
+    ser = serial.Serial(port, baudrate, timeout=1)
+    time.sleep(2)  # 等待 GRBL 上电复位
+
+    # 重置并清空缓冲
+    ser.write(b"\r\n\r\n")
+    time.sleep(2)
+    ser.flushInput()
+
+    # 发送 G-code
+    for line in lines:
+        l = line.strip()
+        if not l or l.startswith("("):  # 跳过空行和注释
+            continue
+        cmd = (l + "\n").encode("utf-8")
+        ser.write(cmd)
+        print(f"Sent: {l}")
+        
+        # 等待 GRBL 回复
+        while True:
+            reply = ser.readline().decode(errors="ignore").strip()
+            if reply:
+                print(f"Reply: {reply}")
+                if reply.lower() == "ok" or reply.lower().startswith("error"):
+                    break
+
+    ser.close()
+    print("✅ G-code upload complete.")
+
 
 if __name__ == "__main__":
     get_font_support()
